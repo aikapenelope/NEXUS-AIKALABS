@@ -30,6 +30,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-directus}
+      # Service users are created by init script (00-init-databases.sql)
+      # with schema-level isolation and restricted permissions.
     command: >
       postgres
       -c shared_buffers=2GB
@@ -126,9 +128,10 @@ services:
       DB_CLIENT: pg
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_DATABASE: ${DIRECTUS_DB_DATABASE:-directus}
+      DB_DATABASE: ${POSTGRES_DB:-directus}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Directus uses public schema for system tables and app schema for business data
 
       CACHE_ENABLED: "true"
       CACHE_STORE: redis
@@ -191,9 +194,9 @@ services:
     container_name: nexus-agno
     restart: unless-stopped
     environment:
-      # Database
-      AGNO_DB_URL: ${AGNO_DB_URL}
-      AGNO_VECTOR_DB_URL: ${AGNO_VECTOR_DB_URL}
+      # Database (agno_user: full CRUD on agno_memory schema, read-only on app/public)
+      AGNO_DB_URL: "postgresql+psycopg://agno_user:agno_password@postgres:5432/${POSTGRES_DB:-directus}"
+      AGNO_VECTOR_DB_URL: "postgresql+psycopg://agno_user:agno_password@postgres:5432/${POSTGRES_DB:-directus}"
 
       # LLM Keys
       GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -296,9 +299,10 @@ services:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: "5432"
-      DB_POSTGRESDB_DATABASE: ${N8N_DB_POSTGRESDB_DATABASE:-n8n}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-directus}
+      DB_POSTGRESDB_SCHEMA: n8n
+      DB_POSTGRESDB_USER: n8n_user
+      DB_POSTGRESDB_PASSWORD: n8n_password
       N8N_BASIC_AUTH_ACTIVE: "true"
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
@@ -344,7 +348,7 @@ services:
     restart: unless-stopped
     command: prefect server start --host 0.0.0.0
     environment:
-      PREFECT_API_DATABASE_CONNECTION_URL: ${PREFECT_API_DATABASE_CONNECTION_URL}
+      PREFECT_API_DATABASE_CONNECTION_URL: "postgresql+asyncpg://prefect_user:prefect_password@postgres:5432/${POSTGRES_DB:-directus}"
       PREFECT_SERVER_API_HOST: "0.0.0.0"
       PREFECT_SERVER_API_PORT: "4200"
     ports:
@@ -379,7 +383,7 @@ services:
       PREFECT_API_URL: http://prefect:4200/api
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_TOKEN: ${DIRECTUS_TOKEN:-}
-      AGNO_VECTOR_DB_URL: ${AGNO_VECTOR_DB_URL}
+      AGNO_VECTOR_DB_URL: "postgresql+psycopg://agno_user:agno_password@postgres:5432/${POSTGRES_DB:-directus}"
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
     depends_on:
       prefect:
