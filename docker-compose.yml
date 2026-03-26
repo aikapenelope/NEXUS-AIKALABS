@@ -6,12 +6,14 @@
 # Services:
 #   postgres   — PostgreSQL 16 + pgvector (shared, isolated databases)
 #   redis      — Redis 7 (Directus cache, queues)
+#   rustfs     — S3-compatible object storage (documents, media, backups)
 #   directus   — Headless CMS + REST/GraphQL API + MCP Server
 #   agno       — AgentOS (FastAPI + AI agents)
-#   frontend   — Next.js + CopilotKit (AG-UI)
+#   frontend   — Next.js + CopilotKit (AG-UI) — ONLY service exposed to internet
 #   n8n        — Workflow automation (deterministic integrations)
 #   prefect    — Workflow orchestration (scraping, ETL, embeddings)
-#   traefik    — Reverse proxy + SSL
+#   uptime-kuma — Health monitoring dashboard
+#   traefik    — Reverse proxy + SSL (exposes frontend + WhatsApp webhook only)
 # =============================================================================
 
 services:
@@ -80,6 +82,34 @@ services:
     networks:
       - nexus-internal
 
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: nexus-rustfs
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      RUSTFS_ROOT_USER: ${RUSTFS_ROOT_USER:-nexus}
+      RUSTFS_ROOT_PASSWORD: ${RUSTFS_ROOT_PASSWORD:-nexus-secret-key}
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - "127.0.0.1:9000:9000"   # S3 API (Tailscale only)
+      - "127.0.0.1:9001:9001"   # Console (Tailscale only)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    networks:
+      - nexus-internal
+
   # ---------------------------------------------------------------------------
   # PLANO DE DATOS Y CONTROL — Directus
   # ---------------------------------------------------------------------------
@@ -113,8 +143,17 @@ services:
 
       # MCP Server (native, for Agno agent integration)
       MCP_ENABLED: "true"
+
+      # Object storage (RustFS / S3-compatible)
+      STORAGE_LOCATIONS: "s3"
+      STORAGE_S3_DRIVER: "s3"
+      STORAGE_S3_KEY: ${RUSTFS_ROOT_USER:-nexus}
+      STORAGE_S3_SECRET: ${RUSTFS_ROOT_PASSWORD:-nexus-secret-key}
+      STORAGE_S3_BUCKET: "directus"
+      STORAGE_S3_ENDPOINT: "http://rustfs:9000"
+      STORAGE_S3_REGION: "us-east-1"
+      STORAGE_S3_FORCE_PATH_STYLE: "true"
     volumes:
-      - directus-uploads:/directus/uploads
       - directus-extensions:/directus/extensions
     ports:
       - "127.0.0.1:8055:8055"
@@ -122,6 +161,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rustfs:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8055/server/health || exit 1"]
@@ -137,10 +178,7 @@ services:
           memory: 512M
     networks:
       - nexus-internal
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.directus.rule=PathPrefix(`/directus`)"
-      - "traefik.http.services.directus.loadbalancer.server.port=8055"
+    # NOT exposed to internet — access via Tailscale only
 
   # ---------------------------------------------------------------------------
   # PLANO COGNITIVO — Agno AgentOS
@@ -206,9 +244,11 @@ services:
     networks:
       - nexus-internal
     labels:
+      # Only expose WhatsApp webhook to internet (Meta requires HTTPS)
       - "traefik.enable=true"
-      - "traefik.http.routers.agno.rule=PathPrefix(`/api/agno`)"
-      - "traefik.http.services.agno.loadbalancer.server.port=8000"
+      - "traefik.http.routers.whatsapp-webhook.rule=Path(`/whatsapp/webhook`)"
+      - "traefik.http.routers.whatsapp-webhook.entrypoints=websecure"
+      - "traefik.http.services.whatsapp-webhook.loadbalancer.server.port=8000"
 
   # ---------------------------------------------------------------------------
   # PLANO DE EXPERIENCIA — Frontend (Next.js + CopilotKit)
@@ -237,9 +277,12 @@ services:
     networks:
       - nexus-internal
     labels:
+      # Frontend is the ONLY service fully exposed to internet
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "traefik.http.routers.frontend.priority=1"
 
   # ---------------------------------------------------------------------------
   # INTEGRACIONES DETERMINISTAS — n8n
@@ -289,10 +332,7 @@ services:
           memory: 256M
     networks:
       - nexus-internal
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.n8n.rule=PathPrefix(`/n8n`)"
-      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    # NOT exposed to internet — access via Tailscale only
 
   # ---------------------------------------------------------------------------
   # PLANO DE TRABAJADORES — Prefect Server
@@ -356,6 +396,34 @@ services:
       - nexus-internal
 
   # ---------------------------------------------------------------------------
+  # MONITORING — Uptime Kuma
+  # ---------------------------------------------------------------------------
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: nexus-uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime-kuma-data:/app/data
+    ports:
+      - "127.0.0.1:3001:3001"  # Tailscale only
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/status-page/heartbeat || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    networks:
+      - nexus-internal
+    # NOT exposed to internet — access via Tailscale only
+
+  # ---------------------------------------------------------------------------
   # REVERSE PROXY — Traefik
   # ---------------------------------------------------------------------------
 
@@ -386,10 +454,11 @@ services:
 volumes:
   postgres-data:
   redis-data:
-  directus-uploads:
+  rustfs-data:
   directus-extensions:
   n8n-data:
   agno-sandboxes:
+  uptime-kuma-data:
   traefik-certs:
 
 # =============================================================================
