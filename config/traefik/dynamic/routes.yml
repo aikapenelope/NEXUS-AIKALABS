@@ -1,0 +1,20 @@
+# NEXUS-AIKALABS — Traefik Dynamic Routes
+# Uncomment and configure when domain is set up.
+
+# http:
+#   routers:
+#     directus:
+#       rule: "Host(`api.${DOMAIN}`)"
+#       service: directus
+#       tls:
+#         certResolver: letsencrypt
+#     agno:
+#       rule: "Host(`agno.${DOMAIN}`)"
+#       service: agno
+#       tls:
+#         certResolver: letsencrypt
+#     frontend:
+#       rule: "Host(`${DOMAIN}`)"
+#       service: frontend
+#       tls:
+#         certResolver: letsencrypt
