@@ -5,6 +5,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 
+# Create public dir if it doesn't exist (Next.js standalone needs it)
+RUN mkdir -p public
+
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
@@ -16,7 +19,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public 2>/dev/null || true
+COPY --from=builder /app/public ./public
 
 EXPOSE 3000
 CMD ["node", "server.js"]
