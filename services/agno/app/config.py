@@ -17,10 +17,14 @@ from agno.vectordb.pgvector import PgVector, SearchType
 # ---------------------------------------------------------------------------
 # Database (PostgreSQL — production)
 # ---------------------------------------------------------------------------
+# Agno uses a dedicated user (agno_user) with search_path=agno_memory,public.
+# This user can ONLY read from Directus tables (app/public schemas).
+# All writes to business data go through Directus REST API (RBAC + audit).
+# Agno has full CRUD on its own schema (agno_memory) for sessions, memory, etc.
 
 AGNO_DB_URL = os.getenv(
     "AGNO_DB_URL",
-    "postgresql+psycopg://nexus:nexus@localhost:5432/agno",
+    "postgresql+psycopg://agno_user:agno_password@postgres:5432/directus",
 )
 AGNO_VECTOR_DB_URL = os.getenv("AGNO_VECTOR_DB_URL", AGNO_DB_URL)
 

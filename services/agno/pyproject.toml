@@ -51,6 +51,9 @@ dependencies = [
     # Frontend: AG-UI protocol for CopilotKit
     "ag-ui-protocol",
 
+    # Document processing (Docling)
+    "docling",
+
     # Docker SDK (for DinD sandbox tool)
     "docker",
 
