@@ -8,12 +8,10 @@ dependencies = [
     "prefect>=3.0",
     "httpx",
     "crawl4ai",
-    "docling",
     "psycopg[binary]",
     "pgvector",
     "voyageai",
     "beautifulsoup4",
-    "agno[postgres]",
 ]
 
 [build-system]

@@ -4,11 +4,6 @@ NEXUS Cerebro — Docker-in-Docker Sandbox Tool.
 Gives AI agents their own persistent compute environment.
 Each sandbox is a Docker container with resource limits.
 State persists between sessions via mounted volumes.
-
-Network access: enabled by default (bridge mode) so the sandbox can
-install packages (pip install), call external APIs, and browse the web.
-The sandbox is isolated from the host's internal Docker network — it
-cannot reach PostgreSQL, Directus, or other NEXUS services directly.
 """
 
 import docker
@@ -21,7 +16,6 @@ _SANDBOX_PREFIX = "nexus-sandbox-"
 _SANDBOX_VOLUME_BASE = "/opt/sandboxes"
 _MEMORY_LIMIT = "512m"
 _CPU_LIMIT = 1.0  # 1 core max
-_SANDBOX_NETWORK = "nexus-sandbox-net"
 
 
 def _get_client() -> docker.DockerClient:
@@ -34,32 +28,12 @@ def _get_client() -> docker.DockerClient:
         )
 
 
-def _ensure_sandbox_network(client: docker.DockerClient) -> str:
-    """Create an isolated bridge network for sandboxes if it doesn't exist.
-
-    This network gives sandboxes internet access (for pip install, API calls)
-    but is separate from nexus-internal, so sandboxes cannot reach PostgreSQL,
-    Directus, Redis, or any other NEXUS service.
-    """
-    try:
-        client.networks.get(_SANDBOX_NETWORK)
-    except NotFound:
-        client.networks.create(
-            _SANDBOX_NETWORK,
-            driver="bridge",
-            internal=False,  # Allow internet access
-        )
-    return _SANDBOX_NETWORK
-
-
 @tool()
 def create_sandbox(sandbox_id: str = "default") -> str:
     """Create or start a persistent sandbox container for code execution.
 
     The sandbox is an isolated Docker container where you can run code,
-    install packages (pip install), call APIs, and store files.
-    State persists between sessions. Has internet access but cannot
-    reach internal NEXUS services (PostgreSQL, Directus, etc.).
+    install packages, and store files. State persists between sessions.
 
     Args:
         sandbox_id: Unique identifier for this sandbox (default: "default").
@@ -76,10 +50,7 @@ def create_sandbox(sandbox_id: str = "default") -> str:
     except NotFound:
         pass
 
-    # Ensure isolated sandbox network exists
-    network = _ensure_sandbox_network(client)
-
-    # Create new sandbox with internet access on isolated network
+    # Create new sandbox
     container = client.containers.run(
         _SANDBOX_IMAGE,
         command="sleep infinity",
@@ -94,10 +65,10 @@ def create_sandbox(sandbox_id: str = "default") -> str:
             }
         },
         working_dir="/workspace",
-        network=network,  # Isolated network with internet, no access to NEXUS services
+        network_mode="none",  # No network access by default (security)
     )
 
-    return f"SANDBOX_CREATED: {name} (image={_SANDBOX_IMAGE}, memory={_MEMORY_LIMIT}, network={network})"
+    return f"SANDBOX_CREATED: {name} (image={_SANDBOX_IMAGE}, memory={_MEMORY_LIMIT})"
 
 
 @tool()

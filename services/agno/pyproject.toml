@@ -51,8 +51,11 @@ dependencies = [
     # Frontend: AG-UI protocol for CopilotKit
     "ag-ui-protocol",
 
-    # Document processing (Docling)
+    # Document processing
     "docling",
+
+    # Reranker client (connects to local Infinity server)
+    "infinity-client",
 
     # Docker SDK (for DinD sandbox tool)
     "docker",
