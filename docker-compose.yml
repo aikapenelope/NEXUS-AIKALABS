@@ -107,6 +107,38 @@ services:
       - nexus-internal
 
   # ---------------------------------------------------------------------------
+  # OBJECT STORAGE — RustFS (S3-compatible)
+  # ---------------------------------------------------------------------------
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: nexus-rustfs
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      RUSTFS_ROOT_USER: ${RUSTFS_ROOT_USER:-nexus}
+      RUSTFS_ROOT_PASSWORD: ${RUSTFS_ROOT_PASSWORD:-nexus-secret-key}
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    networks:
+      - nexus-internal
+
+  # ---------------------------------------------------------------------------
   # PLANO DE DATOS Y CONTROL — Directus
   # ---------------------------------------------------------------------------
 
@@ -139,8 +171,17 @@ services:
 
       # MCP Server (native, for Agno agent integration)
       MCP_ENABLED: "true"
+
+      # Object storage (RustFS / S3-compatible)
+      STORAGE_LOCATIONS: "s3"
+      STORAGE_S3_DRIVER: "s3"
+      STORAGE_S3_KEY: ${RUSTFS_ROOT_USER:-nexus}
+      STORAGE_S3_SECRET: ${RUSTFS_ROOT_PASSWORD:-nexus-secret-key}
+      STORAGE_S3_BUCKET: "directus"
+      STORAGE_S3_ENDPOINT: "http://rustfs:9000"
+      STORAGE_S3_REGION: "us-east-1"
+      STORAGE_S3_FORCE_PATH_STYLE: "true"
     volumes:
-      - directus-uploads:/directus/uploads
       - directus-extensions:/directus/extensions
     ports:
       - "127.0.0.1:8055:8055"
@@ -148,6 +189,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rustfs:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8055/server/health || exit 1"]
@@ -163,10 +206,7 @@ services:
           memory: 512M
     networks:
       - nexus-internal
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.directus.rule=PathPrefix(`/directus`)"
-      - "traefik.http.services.directus.loadbalancer.server.port=8055"
+    # NOT exposed to internet — access via Tailscale only
 
   # ---------------------------------------------------------------------------
   # PLANO COGNITIVO — Agno AgentOS
@@ -179,9 +219,9 @@ services:
     container_name: nexus-agno
     restart: unless-stopped
     environment:
-      # Database
-      AGNO_DB_URL: ${AGNO_DB_URL}
-      AGNO_VECTOR_DB_URL: ${AGNO_VECTOR_DB_URL}
+      # Database (agno_user: full CRUD on agno_memory, read-only on app/public)
+      AGNO_DB_URL: "postgresql+psycopg://agno_user:agno_password@postgres:5432/${POSTGRES_DB:-directus}"
+      AGNO_VECTOR_DB_URL: "postgresql+psycopg://agno_user:agno_password@postgres:5432/${POSTGRES_DB:-directus}"
 
       # LLM Keys
       GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -196,6 +236,9 @@ services:
       # Reranker (local Infinity server, no API key needed)
       RERANKER_HOST: reranker
       RERANKER_PORT: "7997"
+
+      # Prefect (for triggering flows from agents)
+      PREFECT_API_URL: http://prefect:4200/api
 
       # Directus (MCP + REST fallback)
       DIRECTUS_URL: ${DIRECTUS_URL:-http://directus:8055}
@@ -221,6 +264,8 @@ services:
         condition: service_healthy
       directus:
         condition: service_healthy
+      reranker:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
       interval: 15s
@@ -236,9 +281,11 @@ services:
     networks:
       - nexus-internal
     labels:
+      # Only WhatsApp webhook exposed to internet (Meta requires HTTPS)
       - "traefik.enable=true"
-      - "traefik.http.routers.agno.rule=PathPrefix(`/api/agno`)"
-      - "traefik.http.services.agno.loadbalancer.server.port=8000"
+      - "traefik.http.routers.whatsapp-webhook.rule=Path(`/whatsapp/webhook`)"
+      - "traefik.http.routers.whatsapp-webhook.entrypoints=websecure"
+      - "traefik.http.services.whatsapp-webhook.loadbalancer.server.port=8000"
 
   # ---------------------------------------------------------------------------
   # PLANO DE EXPERIENCIA — Frontend (Next.js + CopilotKit)
@@ -267,9 +314,12 @@ services:
     networks:
       - nexus-internal
     labels:
+      # Frontend is the ONLY service fully exposed to internet
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "traefik.http.routers.frontend.priority=1"
 
   # ---------------------------------------------------------------------------
   # INTEGRACIONES DETERMINISTAS — n8n
@@ -283,9 +333,10 @@ services:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: "5432"
-      DB_POSTGRESDB_DATABASE: ${N8N_DB_POSTGRESDB_DATABASE:-n8n}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-directus}
+      DB_POSTGRESDB_SCHEMA: n8n
+      DB_POSTGRESDB_USER: n8n_user
+      DB_POSTGRESDB_PASSWORD: n8n_password
       N8N_BASIC_AUTH_ACTIVE: "true"
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
@@ -319,10 +370,7 @@ services:
           memory: 256M
     networks:
       - nexus-internal
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.n8n.rule=PathPrefix(`/n8n`)"
-      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    # NOT exposed to internet — access via Tailscale only
 
   # ---------------------------------------------------------------------------
   # PLANO DE TRABAJADORES — Prefect Server
@@ -334,7 +382,7 @@ services:
     restart: unless-stopped
     command: prefect server start --host 0.0.0.0
     environment:
-      PREFECT_API_DATABASE_CONNECTION_URL: ${PREFECT_API_DATABASE_CONNECTION_URL}
+      PREFECT_API_DATABASE_CONNECTION_URL: "postgresql+asyncpg://prefect_user:prefect_password@postgres:5432/${POSTGRES_DB:-directus}"
       PREFECT_SERVER_API_HOST: "0.0.0.0"
       PREFECT_SERVER_API_PORT: "4200"
     ports:
@@ -369,7 +417,7 @@ services:
       PREFECT_API_URL: http://prefect:4200/api
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_TOKEN: ${DIRECTUS_TOKEN:-}
-      AGNO_VECTOR_DB_URL: ${AGNO_VECTOR_DB_URL}
+      AGNO_VECTOR_DB_URL: "postgresql+psycopg://agno_user:agno_password@postgres:5432/${POSTGRES_DB:-directus}"
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
     depends_on:
       prefect:
@@ -384,6 +432,28 @@ services:
           memory: 256M
     networks:
       - nexus-internal
+
+  # ---------------------------------------------------------------------------
+  # MONITORING — Uptime Kuma
+  # ---------------------------------------------------------------------------
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: nexus-uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime-kuma-data:/app/data
+    ports:
+      - "127.0.0.1:3001:3001"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    networks:
+      - nexus-internal
+    # NOT exposed to internet — access via Tailscale only
 
   # ---------------------------------------------------------------------------
   # REVERSE PROXY — Traefik
@@ -416,10 +486,11 @@ services:
 volumes:
   postgres-data:
   redis-data:
-  directus-uploads:
+  rustfs-data:
   directus-extensions:
   n8n-data:
   agno-sandboxes:
+  uptime-kuma-data:
   traefik-certs:
 
 # =============================================================================
