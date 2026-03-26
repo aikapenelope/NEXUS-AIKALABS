@@ -23,4 +23,4 @@
 ## Automation Triggers
 - Score >= 7: Create task in Twenty CRM for follow-up
 - Score >= 9: Notify sales team via n8n workflow
-- Score change: Log in Obsidian daily notes
+- Score change: Log in Directus events collection
