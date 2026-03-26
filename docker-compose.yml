@@ -304,8 +304,9 @@ services:
     container_name: nexus-frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_AGNO_URL: ${AGNO_PUBLIC_URL:-http://localhost:8000}
-      NEXT_PUBLIC_DIRECTUS_URL: ${DIRECTUS_PUBLIC_URL:-http://localhost:8055}
+      NEXT_PUBLIC_API_URL: http://agno:8000
+      AGNO_AGUI_URL: http://agno:8000/agui
+      NEXT_PUBLIC_DIRECTUS_URL: http://directus:8055
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
