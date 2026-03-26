@@ -3,14 +3,9 @@ NEXUS Cerebro — AgentOS Entry Point.
 
 Production entry point that registers all agents, teams, and workflows.
 Uses PostgreSQL + pgvector (configured in app.config).
-
-The modular agents in agents/ are the target architecture.
-nexus_legacy.py contains the full original system and is imported here
-until the full refactor is complete.
 """
 
 import os
-import sys
 
 from agno.os import AgentOS
 
@@ -23,17 +18,18 @@ except ImportError:
 
 from agno.os.interfaces.whatsapp.whatsapp import Whatsapp
 
-# ---------------------------------------------------------------------------
-# Production database override
-# ---------------------------------------------------------------------------
-# The legacy nexus.py uses SqliteDb and LanceDb. We monkey-patch the db and
-# vector_db objects BEFORE importing nexus_legacy so all agents use PostgreSQL.
-# This is a transitional approach until the full modular refactor is done.
+from app.config import (
+    db,
+    knowledge_base,
+    whabi_knowledge,
+    docflow_knowledge,
+    aurora_knowledge,
+    learnings_knowledge,
+    load_initial_knowledge,
+)
 
-from app.config import db, knowledge_base, learnings_knowledge, vector_db
-
-# Make config available as a module-level import for nexus_legacy
-sys.modules["app.config"] = sys.modules[__name__]
+# Load initial knowledge documents from knowledge/ folder (first startup only)
+load_initial_knowledge()
 
 # Import modular agents (production-ready, PostgreSQL-native)
 from agents.research import research_agent
@@ -49,15 +45,12 @@ interfaces: list = []
 if _agui_available:
     interfaces.append(AGUI())
 
-# WhatsApp interface (enabled when credentials are set)
 if os.getenv("WHATSAPP_ACCESS_TOKEN"):
     interfaces.append(Whatsapp(agent=support_agent))
 
 # ---------------------------------------------------------------------------
-# AgentOS — Core agents (modular, production-ready)
+# AgentOS
 # ---------------------------------------------------------------------------
-# Start with the 3 core agents. Additional agents from nexus_legacy.py
-# can be added incrementally as they are refactored into modules.
 
 agent_os = AgentOS(
     id="nexus",
@@ -69,7 +62,7 @@ agent_os = AgentOS(
     ],
     teams=[],
     workflows=[],
-    knowledge=[knowledge_base],
+    knowledge=[knowledge_base, whabi_knowledge, docflow_knowledge, aurora_knowledge],
     interfaces=interfaces or None,
     db=db,
     tracing=True,
