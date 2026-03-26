@@ -2,111 +2,103 @@
 
 Plataforma empresarial unificada que separa tres responsabilidades: ingesta determinista de datos, gestion del estado, y razonamiento cognitivo.
 
-## Arquitectura
-
-```
-Internet (HTTPS via Traefik)
-         |
-    +---------+
-    | Traefik | (reverse proxy + SSL)
-    +---------+
-         |
-    +----+----------+----------+--------+
-    |    |          |          |        |
-  Next.js Directus  Agno      n8n    Prefect
-  :3000   :8055     :8000     :5678  :4200
-    |       |         |         |       |
-    |  AG-UI|   MCP   |Directus |       |
-    |<------+-(SSE)---+  Node   |       |
-    |       |         |<--------+       |
-    |       |  REST   |                 |
-    |       |<--------+                 |
-    +-------+----+----+---------+---+---+
-                 |                  |
-          +------+------+   +------+------+
-          | PostgreSQL  |   |   Redis 7   |
-          | 16+pgvector |   | (cache+queue)|
-          +-------------+   +-------------+
-```
-
-## Servicios
-
-| Servicio | Puerto | Funcion |
-|----------|--------|---------|
-| PostgreSQL | 5432 | Base de datos (databases: directus, agno, n8n, prefect) |
-| Redis | 6379 | Cache (Directus) + colas |
-| Directus | 8055 | CMS + REST/GraphQL API + MCP Server |
-| Agno | 8000 | AgentOS (AI agents, WhatsApp, AG-UI) |
-| Frontend | 3000 | Next.js + CopilotKit |
-| n8n | 5678 | Automatizaciones deterministas + MCP server para creacion de flujos con IA |
-| Prefect | 4200 | Orquestacion de workers (scraping, ETL) |
-| Traefik | 80/443 | Reverse proxy + SSL |
-
 ## Quick Start
 
 ```bash
-cp .env.example .env
-# Edit .env with your credentials
-docker compose up -d
+git clone https://github.com/aikapenelope/NEXUS-AIKALABS.git
+cd NEXUS-AIKALABS
+chmod +x setup.sh && ./setup.sh
 ```
 
-## Comunicacion entre servicios
+El script genera secretos aleatorios, construye las imagenes, y levanta los 12 servicios. Despues edita `.env` para agregar tus API keys de LLM.
 
-- **Agno -> Directus**: MCP Server (auto-discovery de colecciones) + REST tools para logica de negocio
-- **Agno -> n8n**: MCP Server (crear, listar, ejecutar workflows de n8n con IA)
-- **n8n -> Directus**: Nodo Directus nativo (CRUD + triggers)
-- **Prefect -> Directus**: HTTP REST API
-- **Frontend -> Agno**: AG-UI protocol (HTTP/SSE)
-- **WhatsApp -> Agno**: Interfaz nativa de AgentOS
+## Servicios (12)
+
+| Servicio | Puerto | Acceso | Funcion |
+|----------|--------|--------|---------|
+| PostgreSQL | 5432 | Interno | DB unica con schemas aislados (directus, agno_memory, n8n, prefect) |
+| Redis | 6379 | Interno | Cache (Directus) + colas |
+| Reranker | 7997 | Interno | Infinity (BAAI/bge-reranker-base, local, sin API key) |
+| RustFS | 9000/9001 | Tailscale | Object storage S3-compatible |
+| Directus | 8055 | Tailscale | CMS + REST/GraphQL API + MCP Server |
+| Agno | 8000 | Tailscale + os.agno.com | AgentOS (AI agents, WhatsApp, AG-UI) |
+| Frontend | 3000 | Internet | Next.js + CopilotKit (unico servicio publico) |
+| n8n | 5678 | Tailscale | Automatizaciones deterministas |
+| Prefect | 4200 | Tailscale | Orquestacion de workers |
+| Prefect Worker | - | Interno | Ejecuta flows (scraping, ETL, embeddings) |
+| Uptime Kuma | 3001 | Tailscale | Health monitoring |
+| Traefik | 80/443 | Internet | Reverse proxy + SSL (solo frontend + WhatsApp webhook) |
+
+## Comunicacion
+
+- **Agno -> Directus**: MCP Server (auto-discovery) + REST tools (logica de negocio)
+- **Agno -> Reranker**: Infinity local (hybrid search + reranking)
+- **Agno -> Prefect**: Trigger tool (dispara flows on-demand)
+- **Agno -> Docling**: Tool nativo (parseo de documentos on-demand)
+- **Agno -> Sandbox**: Docker-in-Docker (microcomputador persistente para IA)
+- **n8n -> Directus**: Nodo nativo verificado (CRUD + triggers)
+- **Prefect -> Directus**: HTTP REST API (ingesta batch)
+- **Prefect -> Docling**: ETL de documentos (batch)
+- **Frontend -> Agno**: AG-UI protocol (CopilotKit)
+- **WhatsApp -> Agno**: Interfaz nativa de AgentOS (via Traefik HTTPS)
+- **Directus -> RustFS**: S3 storage adapter
 
 ---
 
 ## Roadmap
 
-### Fase 1 — Funcional minimo (`docker compose up` end-to-end)
+### Fase 1 — Funcional minimo
 
-- [ ] Agregar MCP tool de n8n al agente de automatizacion (crear flujos con IA)
-- [ ] Crear frontend funcional (Next.js + CopilotKit conectado a Agno via AG-UI)
-- [ ] Configurar colecciones iniciales en Directus (contacts, companies, tickets, tasks, conversations, payments)
-- [ ] Script de setup inicial (`setup.sh`: crea .env, levanta servicios, verifica health)
-- [ ] Abrir puertos en firewall de Hetzner (80/443 para Traefik) via mastra-infra
+- [x] Estructura base (docker-compose, configs, Dockerfiles)
+- [x] 12 servicios con healthchecks, memory limits, restart policies
+- [x] Schema isolation (agno_memory, n8n, prefect, app, public)
+- [x] Agno con 3 agentes core + knowledge isolation por proyecto
+- [x] Reranker local (Infinity) + hybrid search + chunking corto
+- [x] RustFS, Uptime Kuma, Docling, sandbox DinD
+- [x] n8n memory leak prevention + Directus rate limiting
+- [x] Frontend (nexus-ui con CopilotKit + AG-UI)
+- [x] setup.sh para primer deploy
+- [ ] Primer deploy en VPS y correccion de errores
+- [ ] Crear colecciones en Directus (contacts, companies, tickets, tasks, conversations, payments, documents)
+- [ ] Abrir puertos 80/443 en firewall Hetzner
 
 ### Fase 2 — Portar agentes del nexus_legacy.py
 
-- [ ] Portar automation_agent (n8n MCP + Directus MCP)
-- [ ] Portar cerebro team (router entre research, knowledge, automation)
-- [ ] Portar whatsapp_support_team (whabi, docflow, aurora support agents)
-- [ ] Portar content_team (trend_scout, scriptwriter, creative_director, analytics)
-- [ ] Portar product_dev_team, creative_studio, marketing_latam teams
-- [ ] Portar workflows (client_research, content_production, deep_research, seo_content, social_media, competitor_intel, media_generation)
-- [ ] Portar agentes individuales (dash, pal, onboarding, email, scheduler, invoice)
-- [ ] Portar structured output models (Pydantic: ResearchReport, LeadReport, ContentBrief, VideoStoryboard, SupportTicket, PaymentConfirmation)
-- [ ] Portar ResponseQualityEval y registry
+- [ ] automation_agent (n8n MCP + Directus MCP)
+- [ ] cerebro team (router)
+- [ ] whatsapp_support_team (whabi, docflow, aurora)
+- [ ] content_team (trend_scout, scriptwriter, creative_director, analytics)
+- [ ] product_dev_team, creative_studio, marketing_latam
+- [ ] workflows (7)
+- [ ] agentes individuales (dash, pal, onboarding, email, scheduler, invoice)
+- [ ] structured output models + ResponseQualityEval + registry
 
-### Fase 3 — Workers de Prefect (ingesta determinista, sin IA)
+### Fase 3 — Workers de Prefect
 
-- [ ] Implementar flow de scraping LATAM completo (Crawl4AI + parseo + Directus)
-- [ ] Implementar flow de re-embedding (leer Directus -> generar embeddings -> pgvector)
-- [ ] Implementar flow de ETL de documentos (PDF/CSV -> parse -> Directus)
-- [ ] Configurar schedules en Prefect (cron: scraping cada 6h, re-embedding diario)
+- [x] Flow de ETL de documentos con Docling
+- [x] Flow de scraping LATAM (estructura)
+- [ ] Completar scraping con URLs reales
+- [ ] Flow de re-embedding periodico
+- [ ] Flow de backup PostgreSQL -> RustFS
+- [ ] Configurar schedules (cron)
 
-### Fase 4 — Integraciones n8n (deterministas, sin IA, sin tokens)
+### Fase 4 — Integraciones n8n
 
-- [ ] Workflow: Gmail -> Directus (ingesta de emails)
-- [ ] Workflow: WhatsApp webhook -> Directus (backup de conversaciones)
-- [ ] Workflow: Directus trigger -> notificaciones (Slack/Telegram)
+- [ ] Gmail -> Directus
+- [ ] WhatsApp backup -> Directus
+- [ ] Directus trigger -> notificaciones
+- [ ] Nuevo archivo en RustFS -> trigger ETL
 
-### Fase 5 — Produccion y seguridad
+### Fase 5 — Produccion
 
-- [ ] Configurar dominio + SSL (Let's Encrypt via Traefik)
-- [ ] Configurar Tailscale en el VPS para acceso seguro
-- [ ] Backups automaticos de PostgreSQL (pg_dump + Prefect flow)
-- [ ] Configurar WhatsApp Business API (Meta credentials, webhook HTTPS)
-- [ ] Monitoring basico (Uptime Kuma o healthcheck endpoints)
-- [ ] Documentar proceso de actualizacion de cada servicio
+- [ ] Dominio + SSL (Let's Encrypt via Traefik)
+- [ ] Tailscale en VPS
+- [ ] WhatsApp Business API
+- [ ] Uptime Kuma monitors
+- [ ] Conectar os.agno.com
 
 ### Fase 6 — Optimizacion
 
-- [ ] Ajustar memory limits basado en uso real (`docker stats`)
-- [ ] Configurar PgBouncer si las conexiones a PostgreSQL se saturan
-- [ ] Implementar sandbox tool con limites de red configurables
+- [ ] Ajustar memory limits (`docker stats`)
+- [ ] Reranker: evaluar modelo mas grande si hay RAM
+- [ ] PgBouncer si conexiones se saturan
