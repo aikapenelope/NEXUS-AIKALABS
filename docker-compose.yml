@@ -81,6 +81,32 @@ services:
       - nexus-internal
 
   # ---------------------------------------------------------------------------
+  # RERANKER — Infinity (local, no API key)
+  # ---------------------------------------------------------------------------
+
+  reranker:
+    image: michaelf34/infinity:0.0.76
+    container_name: nexus-reranker
+    restart: unless-stopped
+    command: v2 --model-id BAAI/bge-reranker-base --port 7997
+    ports:
+      - "127.0.0.1:7997:7997"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7997/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # Model download on first start
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - nexus-internal
+
+  # ---------------------------------------------------------------------------
   # PLANO DE DATOS Y CONTROL — Directus
   # ---------------------------------------------------------------------------
 
@@ -167,8 +193,9 @@ services:
       # Embeddings
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
 
-      # Reranker (optional)
-      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      # Reranker (local Infinity server, no API key needed)
+      RERANKER_HOST: reranker
+      RERANKER_PORT: "7997"
 
       # Directus (MCP + REST fallback)
       DIRECTUS_URL: ${DIRECTUS_URL:-http://directus:8055}

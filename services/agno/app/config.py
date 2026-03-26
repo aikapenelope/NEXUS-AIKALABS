@@ -12,7 +12,7 @@ from agno.db.postgres import PostgresDb
 from agno.knowledge.chunking.fixed_size_chunking import FixedSizeChunking
 from agno.knowledge.embedder.voyageai import VoyageAIEmbedder
 from agno.knowledge.knowledge import Knowledge
-from agno.knowledge.reranker.cohere import CohereReranker
+from agno.knowledge.reranker import InfinityReranker
 from agno.models.groq import Groq
 from agno.models.openai import OpenAIChat
 from agno.vectordb.pgvector import PgVector, SearchType
@@ -40,11 +40,20 @@ db = PostgresDb(db_url=AGNO_DB_URL)
 embedder = VoyageAIEmbedder(id="voyage-3-lite", dimensions=512)
 
 # ---------------------------------------------------------------------------
-# Reranker (optional — set COHERE_API_KEY to enable)
+# Reranker (local, no API key needed)
 # ---------------------------------------------------------------------------
+# Infinity reranker runs locally as a Docker container (nexus-reranker service).
+# Uses BAAI/bge-reranker-base model (~200MB RAM). No external API calls.
 
-_cohere_key = os.getenv("COHERE_API_KEY")
-reranker = CohereReranker() if _cohere_key else None
+_reranker_host = os.getenv("RERANKER_HOST", "reranker")
+_reranker_port = int(os.getenv("RERANKER_PORT", "7997"))
+
+reranker = InfinityReranker(
+    model="BAAI/bge-reranker-base",
+    host=_reranker_host,
+    port=_reranker_port,
+    top_n=5,
+)
 
 # ---------------------------------------------------------------------------
 # Chunking — short chunks (2000 chars) for precise retrieval.
@@ -107,38 +116,23 @@ learnings_knowledge = Knowledge(
 )
 
 # ---------------------------------------------------------------------------
-# Knowledge Loading (initial documents from knowledge/ folder)
+# Knowledge Loading
 # ---------------------------------------------------------------------------
+# Documents in knowledge/ are loaded on first startup.
+# skip_if_exists=True means restarts don't re-embed existing docs.
+# New documents added to the folder are picked up on next restart.
+# For runtime ingestion (chat/WhatsApp uploads), use the Docling tool.
 
 KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
 
 
 def load_initial_knowledge() -> None:
-    """Load documents from knowledge/ into the general knowledge base on startup."""
+    """Load all documents from knowledge/ into the general knowledge base."""
     if not KNOWLEDGE_DIR.exists():
         return
-
-    from agno.knowledge.reader.markdown import MarkdownReader
-    from agno.knowledge.reader.pdf import PDFReader
-    from agno.knowledge.reader.csv import CSVReader
-    from agno.knowledge.reader.json import JSONReader
-
-    _readers = {
-        ".md": MarkdownReader(chunking_strategy=chunking),
-        ".pdf": PDFReader(chunking_strategy=chunking),
-        ".csv": CSVReader(),
-        ".json": JSONReader(),
-        ".txt": MarkdownReader(chunking_strategy=chunking),
-    }
-
-    for file_path in sorted(KNOWLEDGE_DIR.iterdir()):
-        if file_path.is_dir() or file_path.name.startswith("."):
-            continue
-        reader = _readers.get(file_path.suffix.lower())
-        if reader:
-            knowledge_base.insert(
-                path=str(file_path), reader=reader, skip_if_exists=True,
-            )
+    # Agno auto-detects file types (PDF, MD, CSV, JSON, TXT, DOCX, PPTX).
+    # Chunking is applied via the FixedSizeChunking configured on each reader.
+    knowledge_base.insert(path=str(KNOWLEDGE_DIR), skip_if_exists=True)
 
 
 # ---------------------------------------------------------------------------
