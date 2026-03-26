@@ -3,15 +3,8 @@
 # =============================================================================
 # El Cerebro Corporativo: Unified enterprise workspace
 #
-# Services:
-#   postgres   — PostgreSQL 16 + pgvector (shared, isolated databases)
-#   redis      — Redis 7 (Directus cache, queues)
-#   directus   — Headless CMS + REST/GraphQL API + MCP Server
-#   agno       — AgentOS (FastAPI + AI agents)
-#   frontend   — Next.js + CopilotKit (AG-UI)
-#   n8n        — Workflow automation (deterministic integrations)
-#   prefect    — Workflow orchestration (scraping, ETL, embeddings)
-#   traefik    — Reverse proxy + SSL
+# 12 services, 2 internet-facing routes (frontend + WhatsApp webhook).
+# All other dashboards accessible via Tailscale only.
 # =============================================================================
 
 services:
@@ -42,13 +35,14 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "127.0.0.1:5432:5432"  # Only localhost (access via Tailscale)
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+    stop_grace_period: 30s
     deploy:
       resources:
         limits:
@@ -96,7 +90,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 60s  # Model download on first start
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -154,14 +148,26 @@ services:
       DB_CLIENT: pg
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_DATABASE: ${DIRECTUS_DB_DATABASE:-directus}
+      DB_DATABASE: ${POSTGRES_DB:-directus}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
 
+      # Cache (Redis-backed, auto-purge on data changes)
       CACHE_ENABLED: "true"
       CACHE_STORE: redis
+      CACHE_AUTO_PURGE: "true"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+
+      # Security
+      RATE_LIMITER_ENABLED: "true"
+      RATE_LIMITER_STORE: redis
+      RATE_LIMITER_POINTS: "50"
+      RATE_LIMITER_DURATION: "1"
+      PRESSURE_LIMITER_ENABLED: "true"
+
+      # Logging (warn in production, reduce noise)
+      LOG_LEVEL: "warn"
 
       WEBSOCKETS_ENABLED: "true"
       CORS_ENABLED: "true"
@@ -169,7 +175,7 @@ services:
 
       PUBLIC_URL: ${DIRECTUS_PUBLIC_URL:-http://localhost:8055}
 
-      # MCP Server (native, for Agno agent integration)
+      # MCP Server (for Agno agent integration)
       MCP_ENABLED: "true"
 
       # Object storage (RustFS / S3-compatible)
@@ -233,14 +239,14 @@ services:
       # Embeddings
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
 
-      # Reranker (local Infinity server, no API key needed)
+      # Reranker (local Infinity server)
       RERANKER_HOST: reranker
       RERANKER_PORT: "7997"
 
       # Prefect (for triggering flows from agents)
       PREFECT_API_URL: http://prefect:4200/api
 
-      # Directus (MCP + REST fallback)
+      # Directus (MCP + REST)
       DIRECTUS_URL: ${DIRECTUS_URL:-http://directus:8055}
       DIRECTUS_TOKEN: ${DIRECTUS_TOKEN:-}
 
@@ -250,11 +256,10 @@ services:
       WHATSAPP_WEBHOOK_URL: ${WHATSAPP_WEBHOOK_URL:-}
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
 
-      # Redis (for future use)
+      # Redis
       REDIS_HOST: redis
       REDIS_PORT: "6379"
     volumes:
-      # Docker socket for DinD sandbox tool
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - agno-sandboxes:/opt/sandboxes
     ports:
@@ -272,6 +277,7 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+    stop_grace_period: 15s
     deploy:
       resources:
         limits:
@@ -305,6 +311,12 @@ services:
     depends_on:
       agno:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     deploy:
       resources:
         limits:
@@ -330,6 +342,7 @@ services:
     container_name: nexus-n8n
     restart: unless-stopped
     environment:
+      # Database (schema isolation)
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: "5432"
@@ -337,16 +350,23 @@ services:
       DB_POSTGRESDB_SCHEMA: n8n
       DB_POSTGRESDB_USER: n8n_user
       DB_POSTGRESDB_PASSWORD: n8n_password
+
+      # Auth
       N8N_BASIC_AUTH_ACTIVE: "true"
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
       WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678}
       GENERIC_TIMEZONE: America/Bogota
-      # Performance: disable task runners to avoid known memory leaks
+
+      # Memory leak prevention (critical for production stability)
       N8N_RUNNERS_ENABLED: "false"
-      # Prune old executions to save memory
+      N8N_DEFAULT_BINARY_DATA_MODE: "filesystem"
+      N8N_CONCURRENCY_PRODUCTION_LIMIT: "5"
+
+      # Execution pruning (prevent DB bloat)
       EXECUTIONS_DATA_PRUNE: "true"
-      EXECUTIONS_DATA_MAX_AGE: "168"  # 7 days
+      EXECUTIONS_DATA_MAX_AGE: "168"
+
       # Community nodes (for Directus integration)
       N8N_COMMUNITY_PACKAGES_ENABLED: "true"
     volumes:
@@ -362,6 +382,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    stop_grace_period: 30s
     deploy:
       resources:
         limits:
@@ -405,16 +426,17 @@ services:
     networks:
       - nexus-internal
 
-  # Prefect worker (runs the actual flows: scraping, ETL, embeddings)
   prefect-worker:
     build:
       context: ./services/workers
       dockerfile: Dockerfile
     container_name: nexus-prefect-worker
     restart: unless-stopped
-    command: prefect worker start --pool default-pool --type process
+    command: prefect worker start --pool default-pool --type process --with-healthcheck
     environment:
       PREFECT_API_URL: http://prefect:4200/api
+      PREFECT_WORKER_WEBSERVER_HOST: "0.0.0.0"
+      PREFECT_WORKER_WEBSERVER_PORT: "8080"
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_TOKEN: ${DIRECTUS_TOKEN:-}
       AGNO_VECTOR_DB_URL: "postgresql+psycopg://agno_user:agno_password@postgres:5432/${POSTGRES_DB:-directus}"
@@ -424,6 +446,13 @@ services:
         condition: service_healthy
       directus:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 60s
     deploy:
       resources:
         limits:
@@ -466,7 +495,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "127.0.0.1:8080:8080"  # Dashboard (Tailscale only)
+      - "127.0.0.1:8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./config/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
