@@ -895,25 +895,8 @@ if os.getenv("DIRECTUS_TOKEN"):
         )
     )
 
-# Obsidian vault: read, search, and manage notes from your Obsidian vault.
-# Set OBSIDIAN_VAULT_PATH in ~/.zshrc (e.g., ~/Documents/MyVault)
-# No API key needed -- runs locally via npx.
-_obsidian_vault = os.getenv("OBSIDIAN_VAULT_PATH")
-if _obsidian_vault:
-    _automation_tools.append(
-        MCPTools(
-            command=f"npx -y @bitbonsai/mcpvault {_obsidian_vault}",
-            include_tools=[
-                "read_note",
-                "write_note",
-                "search_notes",
-                "list_directory",
-                "get_frontmatter",
-                "manage_tags",
-            ],
-            timeout_seconds=30,
-        )
-    )
+# Obsidian vault: removed (not available in production environment).
+# Knowledge is managed via Directus collections and Agno's pgvector knowledge base.
 
 # ---------------------------------------------------------------------------
 # Automation Agent
@@ -930,7 +913,7 @@ automation_agent = Agent(
     post_hooks=[_quality_eval],
     skills=_skills,
     instructions=[
-        "You are an automation specialist with access to n8n, Directus CRM, and Obsidian.",
+        "You are an automation specialist with access to n8n and Directus CRM.",
         "IMPORTANT: Always USE your tools to execute actions. NEVER just explain how to do something.",
         "When asked to do something, DO IT using your tools. Do not describe steps.",
         "",
@@ -944,11 +927,6 @@ automation_agent = Agent(
         "- log_conversation(client_name, product, channel, summary, intent, sentiment, lead_score, next_action)",
         "- log_support_ticket(product, intent, summary, resolution, urgency, lead_score)",
         "- All data goes directly to Directus CRM REST API",
-        "",
-        "## Obsidian (knowledge vault)",
-        "- Read, search, and write notes in the Obsidian vault.",
-        "- Use search_notes to find relevant information across all notes.",
-        "- Create new notes when asked to save or document something.",
         "",
         "## Rules",
         "- ALWAYS call tools first, then report results.",
@@ -989,7 +967,7 @@ cerebro = Team(
         "## Routing rules (pick ONE member):",
         "- Web research, news, market data, competitors: route to Research Agent.",
         "- Internal documents, knowledge base, historical data: route to Knowledge Agent.",
-        "- n8n workflows, CRM, Obsidian notes: route to Automation Agent.",
+        "- n8n workflows, CRM operations: route to Automation Agent.",
         "",
         "If the request needs multiple sources, route to Research Agent first.",
         "Do NOT add commentary. Return the member's response directly.",
@@ -2915,7 +2893,7 @@ nexus_master = Team(
         "## Select ONE member based on the request:",
         "- Web research, news, trends → Research Agent",
         "- Internal docs, knowledge base → Knowledge Agent",
-        "- n8n workflows, CRM operations, Obsidian → Automation Agent",
+        "- n8n workflows, CRM operations → Automation Agent",
         "- Business metrics, analytics, data questions → Dash",
         "- Personal notes, bookmarks, reminders → Pal",
         "- Code review, debugging, programming → Code Review Agent",
