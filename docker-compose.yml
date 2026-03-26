@@ -179,15 +179,20 @@ services:
       MCP_ENABLED: "true"
 
       # Object storage (RustFS / S3-compatible)
-      STORAGE_LOCATIONS: "s3"
-      STORAGE_S3_DRIVER: "s3"
-      STORAGE_S3_KEY: ${RUSTFS_ROOT_USER:-nexus}
-      STORAGE_S3_SECRET: ${RUSTFS_ROOT_PASSWORD:-nexus-secret-key}
-      STORAGE_S3_BUCKET: "directus"
-      STORAGE_S3_ENDPOINT: "http://rustfs:9000"
-      STORAGE_S3_REGION: "us-east-1"
-      STORAGE_S3_FORCE_PATH_STYLE: "true"
+      # Requires bucket "directus" to exist in RustFS.
+      # Create it via RustFS console (:9001) or setup.sh before first use.
+      STORAGE_LOCATIONS: "local"
+      # To enable S3 storage, change STORAGE_LOCATIONS to "s3" and uncomment:
+      # STORAGE_LOCATIONS: "s3"
+      # STORAGE_S3_DRIVER: "s3"
+      # STORAGE_S3_KEY: ${RUSTFS_ROOT_USER:-nexus}
+      # STORAGE_S3_SECRET: ${RUSTFS_ROOT_PASSWORD:-nexus-secret-key}
+      # STORAGE_S3_BUCKET: "directus"
+      # STORAGE_S3_ENDPOINT: "http://rustfs:9000"
+      # STORAGE_S3_REGION: "us-east-1"
+      # STORAGE_S3_FORCE_PATH_STYLE: "true"
     volumes:
+      - directus-uploads:/directus/uploads
       - directus-extensions:/directus/extensions
     ports:
       - "127.0.0.1:8055:8055"
@@ -517,6 +522,7 @@ volumes:
   postgres-data:
   redis-data:
   rustfs-data:
+  directus-uploads:
   directus-extensions:
   n8n-data:
   agno-sandboxes:
