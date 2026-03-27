@@ -19,6 +19,9 @@ DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agno_role') THE
 DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'n8n_role') THEN CREATE ROLE n8n_role; END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'prefect_role') THEN CREATE ROLE prefect_role; END IF; END $$;
 
+-- All roles need CONNECT privilege on the database
+GRANT CONNECT ON DATABASE directus TO agno_role, n8n_role, prefect_role;
+
 -- Agno: full CRUD on agno_memory, READ-ONLY on app/public
 GRANT ALL ON SCHEMA agno_memory TO agno_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA agno_memory GRANT ALL ON TABLES TO agno_role;
